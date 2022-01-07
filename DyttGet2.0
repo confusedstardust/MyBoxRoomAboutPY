@@ -136,3 +136,4 @@ if __name__ == '__main__':
     getData(front, rear)
     savePath = savePath + ".xls"
     saveData(dataList, savePath, total)
+    
