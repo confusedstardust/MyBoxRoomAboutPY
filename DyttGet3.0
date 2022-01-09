@@ -1,0 +1,161 @@
+# __author:XiaoHe
+# data:2022/1/8
+"""
+这是一个爬取电影天堂的小工具
+用户输入所需的第一页、最后一页、文件名
+通过合法性校验后，开始收集并写入指定的路径，生成相应的xls文档
+执行过程中会出现正在处理的电影名称
+待mission success的字样出现后即可打开
+"""
+import requests
+import re
+import time
+import xlwt
+from bs4 import BeautifulSoup
+from concurrent.futures import ThreadPoolExecutor
+
+headers = {
+    "User-Agent": "Mozilla / 5.0(Windows NT 10.0;Win64;x64) AppleWebKit / 537.36(KHTML, likeGecko) Chrome / 96.0.4664.110Safari / 537.36",
+    "Cookie": "UM_distinctid=17bde2eb1d620-0f0543a68b0e9a-a7d193d-144000-17bde2eb1d76a; 37cs_user=37cs90879849040; CNZZDATA1260535040=131954868-1631517372-https%253A%252F%252Fwww.baidu.com%252F%7C1641436315; 37cs_pidx=2; 37cs_show=253%2C75; XLA_CI=e803408bdabaf4e25e5fc8f4924c7ad6; cscpvrich5041_fidx=3"
+}
+dataList = []  # 用来存爬取到的内容
+
+
+# 动态获取最新电影目录中的目录页，返回html页面
+def asKUrl(num):
+    reqUrl = requests.get(f'https://www.dytt8.net/html/gndy/dyzz/list_23_{str(num)}.html', headers=headers)
+    reqUrl.encoding = "gb2312"  # 主要看目标网站采用什么编码格式
+    return reqUrl
+
+
+# 接收html页面，封装成soup对象，便于操作结点
+def solveUrl(reqUrl):
+    bsobj = BeautifulSoup(reqUrl.text, "lxml")
+    return bsobj
+
+
+# 接收取得的子链接，对子链接发送请求，拿到对应链接的下载地址
+def getSrcLink(link):
+    # 发送请求获取资源详情页
+    srcPage = requests.get(f'https://www.dytt8.net{link}', headers=headers)
+    srcPage.encoding = "gb2312"
+    bsobj = solveUrl(srcPage)
+    # 定义一个寻找下载地址的attrs
+    attrs = {
+        "style": "WORD-WRAP: break-word",
+        "bgcolor": "#fdfddf"
+    }
+    # 有两种不同的下载连接格式，选择不同方案
+    # 为防止有些链接已失效，加入try catch，并在失效电影对应的表中告知错误
+    try:
+        if (len(bsobj.find_all("td", attrs=attrs))):
+            srclink = bsobj.find_all("td", attrs=attrs)[0]
+            srclink = re.findall(r'<a href="(.*?)">', str(srclink))
+        else:
+            srclink = re.findall(r'<a href="magnet(.*?)"', str(bsobj))[0]
+            srclink = "magnet" + srclink
+    except  IndexError as error:
+        srclink = "此电影的页面或链接解析时出线了问题亦可能是此链接已被删除或更改"
+        print("此电影的页面或链接解析时出线了问题亦可能是此链接已被删除或更改")
+    finally:
+        return srclink
+    # 得到下载地址
+
+
+# 接收首页与尾页参数
+def getData(i):
+    # 定义每个目录页的条目属性便于选取
+    attrs = {
+        "border": "0",
+        "cellpadding": "0",
+        "width": "100%"
+    }
+    reqUrl = asKUrl(i)
+    bsobj = solveUrl(reqUrl)
+    for item in bsobj.find_all("table", attrs=attrs):
+        data = []
+        item = str(item)
+        titleName = re.findall(r'<a class="ulink" href=".*?html">(.*?)</a>', item)[0]
+        print(titleName)
+        link = re.findall(r'<a class="ulink" href="(.*?)">', item)[0]
+        videoSrc = getSrcLink(link)
+        data.append(titleName)
+        data.append(videoSrc)
+        dataList.append(data)
+
+
+# 做输入数据的合法性校验页数要在1-241(包括)之内
+def judgeVal(front, rear):
+    if rear <= 240:
+        total = (rear - front + 1) * 25
+        return total
+    else:
+        total = (rear - front) * 25 + 4
+        return total
+
+
+# 校验文件名的合法性，如果文件名出现问题，则让用户重新输入(递归实现重复判断)
+def judgeFileName(savePath):
+    fileNameRule = re.compile(r'^[^/\\\\:\\*\\?\\<\\>\\|\"]{1,255}$')
+    if re.search(fileNameRule, savePath):
+        return savePath
+    else:
+        savePath = input("输入合法的存储路径！！")
+        savePath = judgeFileName(savePath)
+        return savePath
+
+
+# 保存
+def saveData(dataList, savepath, total):
+    book = xlwt.Workbook(encoding="utf-8")
+    sheet = book.add_sheet("dyttData")
+    # 定义列名
+    col = ("电影名称", "下载链接")
+    for i in range(0, 2):
+        sheet.write(0, i, col[i])  # 写入列名
+    for i in range(0, total):
+        data = dataList[i]
+        for j in range(0, 2):
+            sheet.write(i + 1, j, data[j])
+    book.save(savepath)
+    print("mission.....success")
+
+
+def getPageFront():
+    front = input("请输入开始下载的页数：")
+    front = int(front)
+    if front > 0 and front <= 241:
+        return front
+    else:
+        print("输入合法数值！")
+        front = getPageFront()
+        return front
+
+
+def getPageRear(front):
+    rear = input("请输入停止下载的页数：")
+    rear = int(rear)
+    if rear >= front and rear <= 241:
+        return rear
+    else:
+        print("输入合法数值！")
+        rear = getPageRear(front)
+        return rear
+
+
+if __name__ == '__main__':
+    front = getPageFront()
+    rear = getPageRear(front)
+    total = judgeVal(front, rear)
+    print("下载条目数为%d条" % total)
+    # 下行不可用，会导致total变为String类型
+    # print("下载条目数为"+str(total)+"条")
+    savePath = input("请输入文件名：")
+    savePath = judgeFileName(savePath)
+    # 加入多线程提升爬取速度
+    with ThreadPoolExecutor(50) as t:
+        for i in range(front, rear + 1):
+            t.submit(getData, i)
+    savePath = savePath + ".xls"
+    saveData(dataList,savePath,total)
+
